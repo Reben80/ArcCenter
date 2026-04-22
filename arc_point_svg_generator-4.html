@@ -1,0 +1,270 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Arc & Point SVG Generator</title>
+  <style>
+    :root{--bg:#f7f7fb;--panel:#fff;--ink:#1f2937;--muted:#6b7280;--line:#d1d5db;--accent:#2563eb}
+    *{box-sizing:border-box}
+    body{margin:0;font-family:Arial,Helvetica,sans-serif;background:var(--bg);color:var(--ink)}
+    .wrap{max-width:1100px;margin:0 auto;padding:20px}
+    .top{display:grid;grid-template-columns:320px 1fr;gap:18px;align-items:start}
+    .panel,.canvas-wrap{background:#fff;border:1px solid var(--line);border-radius:16px;padding:16px;box-shadow:0 4px 14px rgba(0,0,0,.05)}
+    h1{font-size:1.4rem;margin:0 0 8px}
+    p{margin:0 0 12px;color:var(--muted);line-height:1.45}
+    .controls{display:grid;gap:12px}
+    .row{display:grid;grid-template-columns:1fr 90px;gap:10px;align-items:center}
+    label{font-size:.95rem;font-weight:600}
+    input,select{width:100%}
+    .value{text-align:right;font-size:.92rem;color:var(--muted)}
+    .buttons{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:8px}
+    button{border:none;background:var(--accent);color:#fff;padding:12px 14px;border-radius:12px;cursor:pointer;font-weight:700;font-size:.95rem}
+    button.secondary{background:#111827}
+    input[type="range"]{accent-color:var(--accent);cursor:pointer}
+    .hint{margin-top:10px;font-size:.92rem;color:var(--muted)}
+    svg{width:100%;height:auto;border-radius:12px;background:white;border:1px solid #e5e7eb}
+    @media (max-width:860px){.top{grid-template-columns:1fr}.buttons{grid-template-columns:1fr}}
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="top">
+      <div class="panel">
+        <h1>Arc & Point SVG Generator</h1>
+        <p>Create a drawing with multiple center points and matching arcs, sized for printing on US letter paper, then download it as an SVG file.</p>
+        <div class="controls">
+          <div><div class="row"><label for="count">Number of pairs</label><div class="value" id="countValue">5</div></div><input id="count" type="range" min="3" max="12" value="5"></div>
+          <div><div class="row"><label for="arcSize">Arc size (degrees)</label><div class="value" id="arcSizeValue">70°</div></div><input id="arcSize" type="range" min="25" max="140" value="70"></div>
+          <div><div class="row"><label for="radiusMin">Min radius</label><div class="value" id="radiusMinValue">45</div></div><input id="radiusMin" type="range" min="20" max="120" value="45"></div>
+          <div><div class="row"><label for="radiusMax">Max radius</label><div class="value" id="radiusMaxValue">110</div></div><input id="radiusMax" type="range" min="50" max="200" value="110"></div>
+          <div><div class="row"><label for="strokeWidth">Arc stroke width</label><div class="value" id="strokeWidthValue">8</div></div><input id="strokeWidth" type="range" min="2" max="18" value="8"></div>
+          <div><div class="row"><label for="showGuides">Show center-to-arc guide</label><div></div></div><select id="showGuides"><option value="no" selected>No</option><option value="yes">Yes</option></select></div>
+          <div><div class="row"><label for="pageOrientation">Letter paper orientation</label><div></div></div><select id="pageOrientation"><option value="portrait" selected>Portrait (8.5 × 11)</option><option value="landscape">Landscape (11 × 8.5)</option></select></div>
+          <div class="buttons"><button id="generateBtn">Generate New</button><button id="downloadBtn" class="secondary">Download SVG</button></div>
+        </div>
+        <p class="hint">Each colored point is the center of its same-colored arc.</p>
+        <p class="hint" id="pairStatus">Showing 0 pairs.</p>
+      </div>
+      <div class="canvas-wrap">
+        <svg id="artboard" viewBox="0 0 850 1100" xmlns="http://www.w3.org/2000/svg" aria-label="Generated arcs and points">
+          <rect x="0" y="0" width="900" height="640" fill="white"/>
+        </svg>
+        <div class="hint">This version is sized for US letter paper. Open it in a browser, generate a layout you like, and save it as SVG.</div>
+      </div>
+    </div>
+  </div>
+  <script>
+    const svg=document.getElementById('artboard');
+    const countInput=document.getElementById('count');
+    const arcSizeInput=document.getElementById('arcSize');
+    const radiusMinInput=document.getElementById('radiusMin');
+    const radiusMaxInput=document.getElementById('radiusMax');
+    const strokeWidthInput=document.getElementById('strokeWidth');
+    const showGuidesInput=document.getElementById('showGuides');
+    const pageOrientationInput=document.getElementById('pageOrientation');
+    const countValue=document.getElementById('countValue');
+    const arcSizeValue=document.getElementById('arcSizeValue');
+    const radiusMinValue=document.getElementById('radiusMinValue');
+    const radiusMaxValue=document.getElementById('radiusMaxValue');
+    const strokeWidthValue=document.getElementById('strokeWidthValue');
+    const pairStatus=document.getElementById('pairStatus');
+    let W=850, H=1100, margin=70;
+
+    function setPageSize(){
+      if(pageOrientationInput.value === 'landscape'){
+        W = 1100;
+        H = 850;
+      } else {
+        W = 850;
+        H = 1100;
+      }
+      svg.setAttribute('viewBox', `0 0 ${W} ${H}`);
+    }
+
+    function rand(min,max){return Math.random()*(max-min)+min}
+    function dist(a,b){const dx=a.x-b.x,dy=a.y-b.y;return Math.sqrt(dx*dx+dy*dy)}
+    function polarToCartesian(cx,cy,r,angleDeg){
+      const a=(angleDeg-90)*Math.PI/180.0;
+      return {x:cx+r*Math.cos(a),y:cy+r*Math.sin(a)};
+    }
+    function describeArc(cx,cy,r,startAngle,endAngle){
+      const start=polarToCartesian(cx,cy,r,endAngle);
+      const end=polarToCartesian(cx,cy,r,startAngle);
+      const largeArcFlag=endAngle-startAngle<=180?"0":"1";
+      return ["M",start.x.toFixed(2),start.y.toFixed(2),"A",r.toFixed(2),r.toFixed(2),0,largeArcFlag,0,end.x.toFixed(2),end.y.toFixed(2)].join(" ");
+    }
+    function pointIsValid(candidate,placed,minGap){return placed.every(p=>dist(candidate,p)>minGap)}
+    function generatePoints(count,maxRadius){
+      const points=[];
+      let minGap=Math.max(42, Math.min(90, maxRadius * 0.95));
+      let tries=0;
+      let relaxSteps=0;
+
+      while(points.length<count && tries<12000){
+        tries++;
+        const p={
+          x:rand(margin+maxRadius, W-margin-maxRadius),
+          y:rand(margin+maxRadius, H-margin-maxRadius)
+        };
+
+        if(pointIsValid(p, points, minGap)){
+          points.push(p);
+        }
+
+        if(tries % 1200 === 0 && points.length < count){
+          minGap = Math.max(26, minGap - 8);
+          relaxSteps++;
+        }
+      }
+
+      // final fallback: force any remaining points with a very small gap
+      let fallbackTries = 0;
+      while(points.length < count && fallbackTries < 15000){
+        fallbackTries++;
+        const p={
+          x:rand(margin+maxRadius, W-margin-maxRadius),
+          y:rand(margin+maxRadius, H-margin-maxRadius)
+        };
+        if(pointIsValid(p, points, 18)){
+          points.push(p);
+        }
+      }
+
+      // absolute last fallback: place on a loose grid so the chosen count always appears
+      if(points.length < count){
+        const cols = Math.ceil(Math.sqrt(count));
+        const rows = Math.ceil(count / cols);
+        const usableW = W - 2 * (margin + maxRadius);
+        const usableH = H - 2 * (margin + maxRadius);
+        const cellW = usableW / Math.max(1, cols);
+        const cellH = usableH / Math.max(1, rows);
+
+        for(let r=0; r<rows && points.length<count; r++){
+          for(let c=0; c<cols && points.length<count; c++){
+            const p = {
+              x: margin + maxRadius + cellW * (c + 0.5),
+              y: margin + maxRadius + cellH * (r + 0.5)
+            };
+            points.push(p);
+          }
+        }
+      }
+
+      return points.slice(0, count);
+    }
+    function clearSVG(){
+      while(svg.firstChild) svg.removeChild(svg.firstChild);
+      const bg=document.createElementNS("http://www.w3.org/2000/svg","rect");
+      bg.setAttribute("x","0"); bg.setAttribute("y","0"); bg.setAttribute("width",W); bg.setAttribute("height",H); bg.setAttribute("fill","white");
+      svg.appendChild(bg);
+
+      const printBorder=document.createElementNS("http://www.w3.org/2000/svg","rect");
+      printBorder.setAttribute("x","20");
+      printBorder.setAttribute("y","20");
+      printBorder.setAttribute("width", W-40);
+      printBorder.setAttribute("height", H-40);
+      printBorder.setAttribute("fill","none");
+      printBorder.setAttribute("stroke","#e5e7eb");
+      printBorder.setAttribute("stroke-width","1");
+      svg.appendChild(printBorder);
+    }
+    function generate(){
+      const count=parseInt(countInput.value,10);
+      const arcSize=parseFloat(arcSizeInput.value);
+      const radiusMin=parseFloat(radiusMinInput.value);
+      const radiusMax=parseFloat(radiusMaxInput.value);
+      const strokeWidth=parseFloat(strokeWidthInput.value);
+      const showGuides=showGuidesInput.value==='yes';
+      if(radiusMin>=radiusMax){alert('Min radius should be smaller than max radius.'); return;}
+      clearSVG();
+      const points=generatePoints(count,radiusMax);
+      const colors=["#ef4444","#3b82f6","#10b981","#f59e0b","#8b5cf6","#ec4899","#14b8a6","#f97316","#6366f1","#84cc16","#06b6d4","#a855f7"];
+      pairStatus.textContent = `Showing ${points.length} pair${points.length === 1 ? '' : 's'}.`;
+      points.forEach((p,i)=>{
+        const color=colors[i%colors.length];
+        const radius=rand(radiusMin,radiusMax);
+        const centerAngle=rand(0,360);
+        const startAngle=centerAngle-arcSize/2;
+        const endAngle=centerAngle+arcSize/2;
+        const arcPath=describeArc(p.x,p.y,radius,startAngle,endAngle);
+        const group=document.createElementNS("http://www.w3.org/2000/svg","g");
+        if(showGuides){
+          const guidePt=polarToCartesian(p.x,p.y,radius,centerAngle);
+          const line=document.createElementNS("http://www.w3.org/2000/svg","line");
+          line.setAttribute("x1",p.x.toFixed(2)); line.setAttribute("y1",p.y.toFixed(2));
+          line.setAttribute("x2",guidePt.x.toFixed(2)); line.setAttribute("y2",guidePt.y.toFixed(2));
+          line.setAttribute("stroke",color); line.setAttribute("stroke-width","1.5"); line.setAttribute("stroke-dasharray","5 4"); line.setAttribute("opacity","0.45");
+          group.appendChild(line);
+        }
+        const arc=document.createElementNS("http://www.w3.org/2000/svg","path");
+        arc.setAttribute("d",arcPath); arc.setAttribute("fill","none"); arc.setAttribute("stroke",color); arc.setAttribute("stroke-width",strokeWidth); arc.setAttribute("stroke-linecap","round");
+        group.appendChild(arc);
+        const pt=document.createElementNS("http://www.w3.org/2000/svg","circle");
+        pt.setAttribute("cx",p.x.toFixed(2)); pt.setAttribute("cy",p.y.toFixed(2)); pt.setAttribute("r",Math.max(5,strokeWidth*0.7)); pt.setAttribute("fill",color);
+        group.appendChild(pt);
+        svg.appendChild(group);
+      });
+    }
+    function downloadSVG(){
+      const clone=svg.cloneNode(true);
+      clone.setAttribute("xmlns","http://www.w3.org/2000/svg");
+      clone.setAttribute("xmlns:xlink","http://www.w3.org/1999/xlink");
+      if(pageOrientationInput.value === 'landscape'){
+        clone.setAttribute("width","11in");
+        clone.setAttribute("height","8.5in");
+      } else {
+        clone.setAttribute("width","8.5in");
+        clone.setAttribute("height","11in");
+      }
+      const serializer=new XMLSerializer();
+      const source='<?xml version="1.0" encoding="UTF-8"?>\n'+serializer.serializeToString(clone);
+      const blob=new Blob([source],{type:'image/svg+xml;charset=utf-8'});
+      const url=URL.createObjectURL(blob);
+      const a=document.createElement('a');
+      a.href=url; a.download='arcs-and-points-letter.svg'; document.body.appendChild(a); a.click(); document.body.removeChild(a); URL.revokeObjectURL(url);
+    }
+    function syncValues(){
+      countValue.textContent=countInput.value;
+      arcSizeValue.textContent=arcSizeInput.value+"°";
+      radiusMinValue.textContent=radiusMinInput.value;
+      radiusMaxValue.textContent=radiusMaxInput.value;
+      strokeWidthValue.textContent=strokeWidthInput.value;
+
+      // keep radius values sensible
+      let minVal = parseFloat(radiusMinInput.value);
+      let maxVal = parseFloat(radiusMaxInput.value);
+
+      if (minVal >= maxVal) {
+        if (document.activeElement === radiusMinInput) {
+          radiusMaxInput.value = Math.min(200, minVal + 5);
+        } else if (document.activeElement === radiusMaxInput) {
+          radiusMinInput.value = Math.max(20, maxVal - 5);
+        } else {
+          radiusMaxInput.value = Math.min(200, minVal + 5);
+        }
+        radiusMinValue.textContent = radiusMinInput.value;
+        radiusMaxValue.textContent = radiusMaxInput.value;
+      }
+    }
+
+    function updateAll(){
+      setPageSize();
+      syncValues();
+      generate();
+    }
+
+    [countInput,arcSizeInput,radiusMinInput,radiusMaxInput,strokeWidthInput].forEach(el=>{
+      el.addEventListener('input', updateAll);
+      el.addEventListener('change', updateAll);
+    });
+
+    document.getElementById('generateBtn').addEventListener('click',generate);
+    document.getElementById('downloadBtn').addEventListener('click',downloadSVG);
+    showGuidesInput.addEventListener('change',updateAll);
+
+    syncValues();
+    generate();
+  </script>
+</body>
+</html>
